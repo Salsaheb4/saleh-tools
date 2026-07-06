@@ -1,0 +1,210 @@
+---
+import Base from '../layouts/Base.astro';
+import { categories, tools, type Tool } from '../data/tools';
+
+// escape for safe display inside the command block
+const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// highlight <angle> placeholders in amber — but not for literal payloads (XSS/SQLi)
+const highlight = (t: Tool) => {
+  if (t.kind === 'payload') return esc(t.cmd);
+  return t.cmd
+    .split(/(<[^>\s][^>]*>)/g)
+    .map((p) => (/^<[^>]+>$/.test(p) ? `<span class="ph">${esc(p)}</span>` : esc(p)))
+    .join('');
+};
+
+const catLabel = (id: string) => categories.find((c) => c.id === id)?.label ?? id;
+
+const searchStr = (t: Tool) =>
+  [t.title, t.cmd, t.desc, (t.tags ?? []).join(' '), t.note, catLabel(t.category)]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+const grouped = categories.map((c) => ({
+  cat: c,
+  items: tools.filter((t) => t.category === c.id),
+}));
+---
+
+<Base
+  title="salsaheb.sh /tools — Pentest command & payload reference"
+  description="Personal pentest toolkit: Nmap, fuzzing (gobuster/feroxbuster/ffuf), SQLi & XSS payloads, Linux privilege escalation. Searchable, copy-on-click."
+>
+  <!-- sticky header: logo + search + category rail -->
+  <header class="top">
+    <div class="top-inner">
+      <a href="https://salsaheb.pages.dev" class="logo"
+        >Salsaheb<span class="tld">.sh</span> <span class="seg">/tools</span></a
+      >
+      <div class="search-wrap">
+        <span class="prompt">▸</span>
+        <input
+          id="search"
+          type="text"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="search commands, payloads, tags…"
+          aria-label="Search commands and payloads"
+        />
+        <span class="search-count"><span id="count"></span> <kbd class="kbd">/</kbd></span>
+      </div>
+    </div>
+    <nav class="cats">
+      {
+        grouped.map(({ cat }) => (
+          <a class="cat-link" href={`#${cat.id}`} data-cat={cat.id}>
+            {cat.label}
+          </a>
+        ))
+      }
+      <span class="spacer"></span>
+      <a class="home-link" href="https://salsaheb.pages.dev">↩ salsaheb.sh</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <p class="kick">saleh@psut:~$ ./tools.sh<span class="cursor"></span></p>
+      <h1>Pentest <span class="tld">Toolkit</span></h1>
+      <p>
+        Commands and payloads I actually reach for — on boxes, in exams, on engagements.
+        Press <kbd class="kbd">/</kbd> to search everything. Click any command to copy it.
+      </p>
+    </section>
+
+    {
+      grouped.map(({ cat, items }, i) => (
+        <section class="cat-sec" id={cat.id}>
+          <div class="wrap">
+            <div class="sec-label">
+              <span class="idx">{String(i + 1).padStart(2, '0')}</span>
+              <span class="sec-name">// {cat.label}</span>
+              {cat.blurb && <span class="sec-blurb">{cat.blurb}</span>}
+            </div>
+            <div class="grid">
+              {items.map((t) => (
+                <article class="tool" data-search={searchStr(t)} data-cmd={t.cmd}>
+                  <div class="tool-head">
+                    <h3 class="tool-title">{t.title}</h3>
+                    <button class="copy" type="button" aria-label="Copy command">copy</button>
+                  </div>
+                  <pre class="tool-cmd" title="click to copy"><code set:html={highlight(t)} /></pre>
+                  {t.desc && <p class="tool-desc">{t.desc}</p>}
+                  {t.note && <p class="tool-note">{t.note}</p>}
+                  <div class="tool-foot">
+                    {(t.tags ?? []).map((tag) => (
+                      <span class="tag">{tag}</span>
+                    ))}
+                    {t.ref && (
+                      <a class="ref" href={t.ref.url} target="_blank" rel="noopener">
+                        {t.ref.label}
+                      </a>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ))
+    }
+
+    <p class="noresults" id="noresults" hidden>
+      no matches for "<b id="nrq"></b>" — try a tool name, flag, or tag.
+    </p>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>© 2026 Saleh Alsaheb · built for the grind</span>
+      <span><a href="https://salsaheb.pages.dev">salsaheb.sh</a> · Amman · UTC+3</span>
+    </div>
+  </footer>
+
+  <script>
+    const search = document.getElementById('search') as HTMLInputElement;
+    const count = document.getElementById('count')!;
+    const noresults = document.getElementById('noresults')!;
+    const nrq = document.getElementById('nrq')!;
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('.tool'));
+    const sections = Array.from(document.querySelectorAll<HTMLElement>('.cat-sec'));
+    const total = cards.length;
+
+    function apply(raw: string) {
+      const q = raw.trim().toLowerCase();
+      const tokens = q.split(/\s+/).filter(Boolean);
+      let shown = 0;
+      for (const card of cards) {
+        const hay = card.dataset.search || '';
+        const match = tokens.every((t) => hay.includes(t));
+        card.hidden = !match;
+        if (match) shown++;
+      }
+      for (const sec of sections) {
+        sec.hidden = !sec.querySelector('.tool:not([hidden])');
+      }
+      count.textContent = tokens.length ? `${shown}/${total}` : `${total} cmds`;
+      const empty = shown === 0 && tokens.length > 0;
+      noresults.hidden = !empty;
+      if (empty) nrq.textContent = q;
+    }
+
+    search.addEventListener('input', () => apply(search.value));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement !== search) {
+        e.preventDefault();
+        search.focus();
+        search.select();
+      } else if (e.key === 'Escape' && document.activeElement === search) {
+        search.value = '';
+        apply('');
+        search.blur();
+      }
+    });
+
+    function copyText(text: string, btn: HTMLElement | null) {
+      navigator.clipboard.writeText(text).then(() => {
+        if (!btn) return;
+        const old = btn.textContent;
+        btn.textContent = 'copied ✓';
+        btn.classList.add('done');
+        setTimeout(() => {
+          btn.textContent = old;
+          btn.classList.remove('done');
+        }, 1200);
+      });
+    }
+
+    for (const card of cards) {
+      const cmd = card.dataset.cmd || '';
+      const btn = card.querySelector<HTMLElement>('.copy');
+      btn?.addEventListener('click', () => copyText(cmd, btn));
+      card.querySelector('.tool-cmd')?.addEventListener('click', () => copyText(cmd, btn));
+    }
+
+    // highlight the category in the rail as you scroll
+    const links = Array.from(document.querySelectorAll<HTMLElement>('.cat-link'));
+    const byId: Record<string, HTMLElement> = {};
+    for (const l of links) byId[l.dataset.cat || ''] = l;
+    const spy = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          if (en.isIntersecting) {
+            links.forEach((l) => l.classList.remove('on'));
+            byId[en.target.id]?.classList.add('on');
+          }
+        }
+      },
+      { rootMargin: '-45% 0px -50% 0px' }
+    );
+    for (const s of sections) spy.observe(s);
+
+    apply('');
+  </script>
+</Base>
